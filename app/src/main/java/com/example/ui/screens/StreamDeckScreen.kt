@@ -10,30 +10,23 @@ import com.example.data.CarStreamSettingsEntity
 import com.example.ui.components.CarStreamMediaViewport
 import com.example.viewmodel.PlayerUiState
 
-/**
- * Full-Screen YouTube & Video Player screen without any top Omnibox card blocking the view.
- * Gives 100% of the screen area directly to YouTube / video playback.
- */
 @Composable
 fun StreamDeckScreen(
     uiState: PlayerUiState,
     settings: CarStreamSettingsEntity,
     bookmarks: List<BookmarkEntity>,
-    onSearchQueryChange: (String) -> Unit,
-    onSubmitSearchOrUrl: (String) -> Unit,
     onSelectBookmark: (BookmarkEntity) -> Unit,
-    onOpenAddBookmark: () -> Unit,
     onPageStarted: (String) -> Unit,
     onPageFinished: (String, String?, Boolean) -> Unit,
     onProgressChanged: (Int) -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeekDelta: (Int) -> Unit,
+    onToggleFullscreen: () -> Unit,
     onOpenAspectSheet: () -> Unit,
     onOpenAudioSyncSheet: () -> Unit,
     onOpenRotaryKeyboard: () -> Unit,
     onBookmarkCurrent: () -> Unit,
     onPickLocalVideo: () -> Unit,
-    onOpenCarHudScreen: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -51,6 +44,7 @@ fun StreamDeckScreen(
             onProgressChanged = onProgressChanged,
             onTogglePlayPause = onTogglePlayPause,
             onSeekDelta = onSeekDelta,
+            onToggleFullscreen = onToggleFullscreen,
             onOpenAspectSheet = onOpenAspectSheet,
             onOpenAudioSyncSheet = onOpenAudioSyncSheet,
             onOpenRotaryKeyboard = onOpenRotaryKeyboard,

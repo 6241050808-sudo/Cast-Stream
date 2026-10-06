@@ -18,13 +18,14 @@ class ExampleRobolectricTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun carStreamNavigationAndAndroidAutoHudWorks() {
-        // Verify Stream Deck screen is displayed on launch
+    fun carStreamNavigationAndFullscreenToggleWorks() {
+        // Verify Stream Deck screen and Fullscreen toggle button are displayed on launch
         composeTestRule.onNodeWithTag("stream_deck_screen").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_toggle_fullscreen_top").assertIsDisplayed()
 
-        // Navigate to Android Auto Head-Unit HUD screen
-        composeTestRule.onNodeWithTag("nav_tab_car_head_unit_hud").performClick()
-        composeTestRule.onNodeWithTag("android_auto_hud_screen").assertIsDisplayed()
+        // Navigate to Bookmarks & History screen
+        composeTestRule.onNodeWithTag("nav_tab_bookmarks_history").performClick()
+        composeTestRule.onNodeWithTag("bookmarks_history_screen").assertIsDisplayed()
 
         // Navigate to Engine Fixes screen
         composeTestRule.onNodeWithTag("nav_tab_engine_fixes").performClick()

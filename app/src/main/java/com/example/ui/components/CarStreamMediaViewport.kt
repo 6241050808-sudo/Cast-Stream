@@ -25,6 +25,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,6 +47,8 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Forward10
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Keyboard
@@ -70,11 +73,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.BookmarkEntity
@@ -99,6 +101,7 @@ fun CarStreamMediaViewport(
     onProgressChanged: (Int) -> Unit,
     onTogglePlayPause: () -> Unit,
     onSeekDelta: (Int) -> Unit,
+    onToggleFullscreen: () -> Unit,
     onOpenAspectSheet: () -> Unit,
     onOpenAudioSyncSheet: () -> Unit,
     onOpenRotaryKeyboard: () -> Unit,
@@ -106,26 +109,35 @@ fun CarStreamMediaViewport(
     onPickLocalVideo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scaleX = when (settings.aspectRatioMode) {
-        "ULTRAWIDE_21_9" -> 1.16f
-        "STRETCH_FULL" -> 1.08f
+    // Proportional scaling that never clips the WebView container bounds
+    val baseScale = (settings.customZoomPercent.coerceIn(85, 135)) / 100f
+    val videoScaleX = when (settings.aspectRatioMode) {
+        "ULTRAWIDE_21_9" -> 1.12f
+        "STRETCH_FULL" -> 1.06f
         "ZOOM_115" -> 1.15f
-        "ZOOM_130" -> 1.30f
-        else -> (settings.customZoomPercent.coerceIn(85, 145)) / 100f
+        "ZOOM_130" -> 1.25f
+        else -> baseScale
     }
-    val scaleY = when (settings.aspectRatioMode) {
-        "ULTRAWIDE_21_9" -> 1.04f
-        "STRETCH_FULL" -> 1.08f
+    val videoScaleY = when (settings.aspectRatioMode) {
+        "ULTRAWIDE_21_9" -> 1.02f
+        "STRETCH_FULL" -> 1.06f
         "ZOOM_115" -> 1.15f
-        "ZOOM_130" -> 1.30f
-        else -> (settings.customZoomPercent.coerceIn(85, 145)) / 100f
+        "ZOOM_130" -> 1.25f
+        else -> baseScale
     }
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var customFullscreenView by remember { mutableStateOf<View?>(null) }
+    var customViewCallback by remember { mutableStateOf<WebChromeClient.CustomViewCallback?>(null) }
     var lastLoadedUrl by remember { mutableStateOf("") }
     var webViewReloadInstanceKey by remember { mutableIntStateOf(0) }
     var showBottomDock by remember { mutableStateOf(true) }
     var showQuickChannelsStrip by remember { mutableStateOf(false) }
+
+    // Auto-collapse dock when entering immersive fullscreen so YouTube fills 100% of phone & car screen
+    LaunchedEffect(uiState.isImmersiveFullscreen) {
+        showBottomDock = !uiState.isImmersiveFullscreen
+    }
 
     // Execute queued JavaScript commands when commandNonce updates
     LaunchedEffect(uiState.commandNonce) {
@@ -153,25 +165,26 @@ fun CarStreamMediaViewport(
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. FULLSCREEN YOUTUBE / VIDEO SURFACE
+        val isWideCarScreen = maxWidth >= 600.dp
+
+        // 1. PROPORTIONAL YOUTUBE / VIDEO SURFACE (Fits both Mobile Portrait/Landscape & Car Widescreen)
         if (uiState.activeSourceType == ActiveSourceType.LOCAL_VIDEO && uiState.localVideoUri != null) {
             LocalVideoSurface(
                 uri = uiState.localVideoUri,
                 isPlaying = uiState.isPlaying,
-                scaleX = scaleX,
-                scaleY = scaleY
+                scaleX = videoScaleX,
+                scaleY = videoScaleY
             )
         } else {
             key(webViewReloadInstanceKey) {
                 AndroidView(
                     modifier = Modifier
                         .fillMaxSize()
-                        .scale(scaleX = scaleX, scaleY = scaleY)
                         .testTag("carstream_webview"),
                     factory = { context ->
                         WebView(context).apply {
@@ -197,6 +210,7 @@ fun CarStreamMediaViewport(
                                 useWideViewPort = true
                                 builtInZoomControls = false
                                 displayZoomControls = false
+                                textZoom = 100
                                 cacheMode = WebSettings.LOAD_DEFAULT
                                 userAgentString = resolveUserAgent(settings.userAgentMode)
                             }
@@ -204,6 +218,24 @@ fun CarStreamMediaViewport(
                             webChromeClient = object : WebChromeClient() {
                                 override fun onProgressChanged(view: WebView?, newProgress: Int) {
                                     onProgressChanged(newProgress)
+                                }
+
+                                // Support native HTML5 YouTube fullscreen button on both phone and car displays
+                                override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+                                    customFullscreenView = view
+                                    customViewCallback = callback
+                                    if (!uiState.isImmersiveFullscreen) {
+                                        onToggleFullscreen()
+                                    }
+                                }
+
+                                override fun onHideCustomView() {
+                                    customFullscreenView = null
+                                    customViewCallback?.onCustomViewHidden()
+                                    customViewCallback = null
+                                    if (uiState.isImmersiveFullscreen) {
+                                        onToggleFullscreen()
+                                    }
                                 }
                             }
 
@@ -223,6 +255,11 @@ fun CarStreamMediaViewport(
                                     if (settings.adShieldEnabled) {
                                         view?.evaluateJavascript(AD_SHIELD_AND_ENHANCE_SCRIPT, null)
                                     }
+                                    // Ensure video fits container proportionally
+                                    view?.evaluateJavascript(
+                                        buildVideoFitScript(settings.aspectRatioMode, settings.customZoomPercent),
+                                        null
+                                    )
                                 }
 
                                 override fun shouldOverrideUrlLoading(
@@ -262,6 +299,14 @@ fun CarStreamMediaViewport(
                     }
                 )
             }
+
+            // If HTML5 video triggered native custom fullscreen view, render it on top
+            customFullscreenView?.let { fsView ->
+                AndroidView(
+                    modifier = Modifier.fillMaxSize(),
+                    factory = { fsView }
+                )
+            }
         }
 
         // 2. Thin Loading Indicator at very top edge
@@ -279,7 +324,55 @@ fun CarStreamMediaViewport(
             )
         }
 
-        // 3. Collapsible Floating CarStream Control Dock at Bottom
+        // 3. Dedicated Top-Right Quick Fullscreen Button (Always accessible on both Mobile & Car screen)
+        Surface(
+            onClick = {
+                if (customFullscreenView != null) {
+                    customFullscreenView = null
+                    customViewCallback?.onCustomViewHidden()
+                    customViewCallback = null
+                }
+                onToggleFullscreen()
+            },
+            shape = RoundedCornerShape(12.dp),
+            color = ObsidianBlack.copy(alpha = 0.78f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 10.dp, end = 10.dp)
+                .border(
+                    width = 1.dp,
+                    color = if (uiState.isImmersiveFullscreen) CrimsonStream else ElectricCyan.copy(alpha = 0.65f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .testTag("btn_toggle_fullscreen_top")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    imageVector = if (uiState.isImmersiveFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                    contentDescription = if (uiState.isImmersiveFullscreen) "ออกจากโหมดเต็มจอ" else "เข้าสู่โหมดเต็มจอ",
+                    tint = if (uiState.isImmersiveFullscreen) CrimsonStream else ElectricCyan,
+                    modifier = Modifier.size(18.dp)
+                )
+                Text(
+                    text = if (uiState.isImmersiveFullscreen) {
+                        "ออกเต็มจอ"
+                    } else if (isWideCarScreen) {
+                        "เต็มจอรถ"
+                    } else {
+                        "เต็มจอ"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // 4. Collapsible Floating CarStream Control Dock at Bottom
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -298,7 +391,7 @@ fun CarStreamMediaViewport(
                         .fillMaxWidth()
                         .padding(bottom = 6.dp)
                         .clip(RoundedCornerShape(14.dp))
-                        .background(ObsidianBlack.copy(alpha = 0.90f))
+                        .background(ObsidianBlack.copy(alpha = 0.92f))
                         .border(1.dp, ElectricCyan.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
                         .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 10.dp, vertical = 6.dp),
@@ -327,7 +420,7 @@ fun CarStreamMediaViewport(
                 }
             }
 
-            // Main Floating Control Bar
+            // Main Floating Control Bar (Proportional & Scrollable for both Mobile and Car displays)
             AnimatedVisibility(
                 visible = showBottomDock,
                 enter = fadeIn() + slideInVertically { it },
@@ -335,7 +428,7 @@ fun CarStreamMediaViewport(
             ) {
                 Surface(
                     shape = RoundedCornerShape(18.dp),
-                    color = ObsidianBlack.copy(alpha = 0.88f),
+                    color = ObsidianBlack.copy(alpha = 0.90f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.7f), RoundedCornerShape(18.dp))
@@ -431,11 +524,18 @@ fun CarStreamMediaViewport(
 
                         Spacer(modifier = Modifier.width(8.dp))
 
-                        // CarStream Enhancement Tools (Keyboard, Aspect Ratio, Audio Sync, Local Video, Channels, Hide Dock)
+                        // CarStream Enhancement Tools (Fullscreen, Keyboard, Aspect Ratio, Audio Sync, Local Video, Channels, Hide Dock)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            DockIconButton(
+                                icon = if (uiState.isImmersiveFullscreen) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                contentDesc = if (uiState.isImmersiveFullscreen) "ออกจากโหมดเต็มจอ" else "เข้าสู่โหมดเต็มจอ",
+                                testTag = "btn_toggle_fullscreen_dock",
+                                tint = ElectricCyan,
+                                onClick = onToggleFullscreen
+                            )
                             DockIconButton(
                                 icon = Icons.Default.Keyboard,
                                 contentDesc = "ค้นหา YouTube / แป้นพิมพ์ในรถ",
@@ -472,7 +572,7 @@ fun CarStreamMediaViewport(
                             )
                             DockIconButton(
                                 icon = Icons.Default.ExpandMore,
-                                contentDesc = "ซ่อนแถบควบคุมเพื่อดูเต็มจอ",
+                                contentDesc = "ซ่อนแถบควบคุม",
                                 testTag = "btn_hide_dock",
                                 onClick = { showBottomDock = false }
                             )
@@ -486,7 +586,7 @@ fun CarStreamMediaViewport(
                 Surface(
                     onClick = { showBottomDock = true },
                     shape = CircleShape,
-                    color = ObsidianBlack.copy(alpha = 0.8f),
+                    color = ObsidianBlack.copy(alpha = 0.82f),
                     modifier = Modifier
                         .border(1.dp, ElectricCyan.copy(alpha = 0.6f), CircleShape)
                         .testTag("btn_show_dock")
@@ -533,7 +633,7 @@ private fun LocalVideoSurface(
     AndroidView(
         modifier = Modifier
             .fillMaxSize()
-            .scale(scaleX = scaleX, scaleY = scaleY)
+            .graphicsLayer(scaleX = scaleX, scaleY = scaleY)
             .testTag("local_video_view"),
         factory = { context ->
             VideoView(context).apply {
@@ -592,6 +692,32 @@ private fun resolveUserAgent(mode: String): String {
     }
 }
 
+private fun buildVideoFitScript(mode: String, customZoom: Int): String {
+    val cssRule = when (mode) {
+        "ULTRAWIDE_21_9" -> "object-fit: cover !important; transform: scale(1.14, 1.02) !important;"
+        "STRETCH_FULL" -> "object-fit: fill !important; transform: scale(1.0) !important;"
+        "ZOOM_115" -> "object-fit: cover !important; transform: scale(1.15) !important;"
+        "ZOOM_130" -> "object-fit: cover !important; transform: scale(1.30) !important;"
+        else -> {
+            val scale = (customZoom.coerceIn(85, 145)) / 100.0
+            "object-fit: contain !important; transform: scale($scale) !important;"
+        }
+    }
+    return """
+        (function() {
+            try {
+                var s = document.getElementById('carstream-fit-style');
+                if (!s) {
+                    s = document.createElement('style');
+                    s.id = 'carstream-fit-style';
+                    document.head.appendChild(s);
+                }
+                s.innerHTML = 'video { width: 100% !important; height: 100% !important; max-width: 100vw !important; max-height: 100vh !important; $cssRule }';
+            } catch(e) {}
+        })();
+    """.trimIndent()
+}
+
 private val AD_SHIELD_AND_ENHANCE_SCRIPT = """
     (function() {
         try {
@@ -608,6 +734,9 @@ private val AD_SHIELD_AND_ENHANCE_SCRIPT = """
                     .mealbar-promo-renderer,
                     ytm-statement-banner-renderer {
                         display: none !important;
+                    }
+                    body {
+                        overflow-x: hidden !important;
                     }
                     *:focus {
                         outline: 3px solid #00E5FF !important;

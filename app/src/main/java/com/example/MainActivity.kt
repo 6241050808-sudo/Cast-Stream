@@ -32,7 +32,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.PlayCircleFilled
@@ -50,15 +49,20 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.CarStreamDatabase
@@ -66,7 +70,6 @@ import com.example.data.CarStreamRepository
 import com.example.ui.components.AspectRatioCalibratorSheet
 import com.example.ui.components.AudioSyncCalibratorSheet
 import com.example.ui.components.CarRotaryKeyboardSheet
-import com.example.ui.screens.AndroidAutoHeadUnitScreen
 import com.example.ui.screens.BookmarksAndHistoryScreen
 import com.example.ui.screens.CarStreamFixesScreen
 import com.example.ui.screens.StreamDeckScreen
@@ -95,6 +98,22 @@ class MainActivity : ComponentActivity() {
         handleIncomingShareIntent(intent)
 
         setContent {
+            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val view = LocalView.current
+
+            // Toggle system bars (Status Bar & Navigation Bar) when entering/exiting Immersive Fullscreen
+            LaunchedEffect(uiState.isImmersiveFullscreen) {
+                val window = this@MainActivity.window ?: return@LaunchedEffect
+                val insetsController = WindowCompat.getInsetsController(window, view)
+                if (uiState.isImmersiveFullscreen) {
+                    insetsController.systemBarsBehavior =
+                        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    insetsController.hide(WindowInsetsCompat.Type.systemBars())
+                } else {
+                    insetsController.show(WindowInsetsCompat.Type.systemBars())
+                }
+            }
+
             MyApplicationTheme {
                 CarStreamAppRoot(viewModel = viewModel)
             }
@@ -129,7 +148,7 @@ fun CarStreamAppRoot(
     val history by viewModel.history.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
 
-    // Zero-permission Android Photo Picker for Local Videos (Play Policy Compliant)
+    // Zero-permission Android Photo Picker for Local Videos
     val videoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -138,14 +157,20 @@ fun CarStreamAppRoot(
         }
     }
 
-    // BackHandler for secondary screens
-    BackHandler(enabled = uiState.currentDestination != AppDestination.STREAM_DECK) {
-        viewModel.selectDestination(AppDestination.STREAM_DECK)
+    // BackHandler exits Immersive Fullscreen first, or returns to Stream Deck from secondary tabs
+    BackHandler(
+        enabled = uiState.isImmersiveFullscreen || uiState.currentDestination != AppDestination.STREAM_DECK
+    ) {
+        if (uiState.isImmersiveFullscreen) {
+            viewModel.setImmersiveFullscreen(false)
+        } else {
+            viewModel.selectDestination(AppDestination.STREAM_DECK)
+        }
     }
 
+    // Removed 2nd item ("จอในรถ (AA)") as requested; now 3 clean navigation items
     val navItems = listOf(
         Triple(AppDestination.STREAM_DECK, "เครื่องเล่น", Icons.Default.PlayCircleFilled),
-        Triple(AppDestination.CAR_HEAD_UNIT_HUD, "จอในรถ (AA)", Icons.Default.DirectionsCar),
         Triple(AppDestination.BOOKMARKS_HISTORY, "บุ๊กมาร์ก", Icons.Default.Bookmarks),
         Triple(AppDestination.ENGINE_FIXES, "แก้ข้อจำกัด", Icons.Default.Tune)
     )
@@ -158,13 +183,18 @@ fun CarStreamAppRoot(
         val isExpandedOrLandscape = maxWidth >= 640.dp
 
         Scaffold(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+            modifier = if (uiState.isImmersiveFullscreen) {
+                Modifier.fillMaxSize()
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+            },
             containerColor = ObsidianBlack,
             topBar = {
-                if (uiState.currentDestination == AppDestination.BOOKMARKS_HISTORY ||
-                    uiState.currentDestination == AppDestination.ENGINE_FIXES
+                if (!uiState.isImmersiveFullscreen &&
+                    (uiState.currentDestination == AppDestination.BOOKMARKS_HISTORY ||
+                        uiState.currentDestination == AppDestination.ENGINE_FIXES)
                 ) {
                     CarStreamTopCockpitBar(
                         currentDestination = uiState.currentDestination,
@@ -180,7 +210,7 @@ fun CarStreamAppRoot(
                 }
             },
             bottomBar = {
-                if (!isExpandedOrLandscape) {
+                if (!isExpandedOrLandscape && !uiState.isImmersiveFullscreen) {
                     NavigationBar(
                         containerColor = CarbonSurface,
                         modifier = Modifier.testTag("bottom_nav_bar")
@@ -222,7 +252,7 @@ fun CarStreamAppRoot(
                     .fillMaxSize()
                     .padding(innerPadding)
             ) {
-                if (isExpandedOrLandscape) {
+                if (isExpandedOrLandscape && !uiState.isImmersiveFullscreen) {
                     NavigationRail(
                         containerColor = CarbonSurface,
                         modifier = Modifier
@@ -258,40 +288,6 @@ fun CarStreamAppRoot(
                                 uiState = uiState,
                                 settings = settings,
                                 bookmarks = bookmarks,
-                                onSearchQueryChange = viewModel::updateSearchInput,
-                                onSubmitSearchOrUrl = viewModel::submitSearchOrUrl,
-                                onSelectBookmark = { bm ->
-                                    viewModel.loadWebStream(bm.url, bm.title)
-                                },
-                                onOpenAddBookmark = {
-                                    viewModel.selectDestination(AppDestination.BOOKMARKS_HISTORY)
-                                    viewModel.toggleAddBookmarkDialog(true)
-                                },
-                                onPageStarted = viewModel::onWebPageStarted,
-                                onPageFinished = viewModel::onWebPageFinished,
-                                onProgressChanged = viewModel::onWebProgressChanged,
-                                onTogglePlayPause = viewModel::togglePlayPause,
-                                onSeekDelta = viewModel::seekBySeconds,
-                                onOpenAspectSheet = { viewModel.toggleAspectSheet(true) },
-                                onOpenAudioSyncSheet = { viewModel.toggleAudioSyncSheet(true) },
-                                onOpenRotaryKeyboard = { viewModel.toggleRotaryKeyboard(true) },
-                                onBookmarkCurrent = viewModel::bookmarkCurrentStream,
-                                onPickLocalVideo = {
-                                    videoPickerLauncher.launch(
-                                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly)
-                                    )
-                                },
-                                onOpenCarHudScreen = {
-                                    viewModel.selectDestination(AppDestination.CAR_HEAD_UNIT_HUD)
-                                }
-                            )
-                        }
-
-                        AppDestination.CAR_HEAD_UNIT_HUD -> {
-                            AndroidAutoHeadUnitScreen(
-                                uiState = uiState,
-                                settings = settings,
-                                bookmarks = bookmarks,
                                 onSelectBookmark = { bm ->
                                     viewModel.loadWebStream(bm.url, bm.title)
                                 },
@@ -300,6 +296,7 @@ fun CarStreamAppRoot(
                                 onProgressChanged = viewModel::onWebProgressChanged,
                                 onTogglePlayPause = viewModel::togglePlayPause,
                                 onSeekDelta = viewModel::seekBySeconds,
+                                onToggleFullscreen = viewModel::toggleImmersiveFullscreen,
                                 onOpenAspectSheet = { viewModel.toggleAspectSheet(true) },
                                 onOpenAudioSyncSheet = { viewModel.toggleAudioSyncSheet(true) },
                                 onOpenRotaryKeyboard = { viewModel.toggleRotaryKeyboard(true) },
@@ -419,7 +416,6 @@ private fun CarStreamTopCockpitBar(
                     Text(
                         text = when (currentDestination) {
                             AppDestination.STREAM_DECK -> "YouTube • Plex • Local Video Cockpit"
-                            AppDestination.CAR_HEAD_UNIT_HUD -> "Android Auto Coolwalk Head-Unit Projection"
                             AppDestination.BOOKMARKS_HISTORY -> "Pinned Channels & Playback History"
                             AppDestination.ENGINE_FIXES -> "Limitation Fixes & Engine Calibration"
                         },

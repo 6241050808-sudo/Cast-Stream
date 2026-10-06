@@ -21,7 +21,6 @@ import kotlinx.coroutines.launch
 enum class AppDestination {
     STREAM_DECK,
     BOOKMARKS_HISTORY,
-    CAR_HEAD_UNIT_HUD,
     ENGINE_FIXES
 }
 
@@ -38,6 +37,7 @@ data class PlayerUiState(
     val localVideoUri: Uri? = null,
     val localVideoName: String = "",
     val isPlaying: Boolean = true,
+    val isImmersiveFullscreen: Boolean = false,
     val isLoadingWeb: Boolean = false,
     val webProgress: Int = 0,
     val showRotaryKeyboard: Boolean = false,
@@ -83,7 +83,34 @@ class CarStreamViewModel(
     }
 
     fun selectDestination(destination: AppDestination) {
-        _uiState.update { it.copy(currentDestination = destination) }
+        _uiState.update {
+            it.copy(
+                currentDestination = destination,
+                isImmersiveFullscreen = if (destination != AppDestination.STREAM_DECK) false else it.isImmersiveFullscreen
+            )
+        }
+    }
+
+    fun setImmersiveFullscreen(fullscreen: Boolean) {
+        _uiState.update { it.copy(isImmersiveFullscreen = fullscreen) }
+        if (fullscreen) {
+            // Also expand HTML5 video inside YouTube/WebView to fill the viewport cleanly
+            val js = """
+                javascript:(function(){
+                    var v = document.querySelector('video');
+                    if (v) {
+                        v.style.objectFit = 'contain';
+                        v.style.width = '100%';
+                        v.style.height = '100%';
+                    }
+                })();
+            """.trimIndent()
+            dispatchJsCommand(js)
+        }
+    }
+
+    fun toggleImmersiveFullscreen() {
+        setImmersiveFullscreen(!_uiState.value.isImmersiveFullscreen)
     }
 
     fun updateSearchInput(text: String) {
@@ -254,12 +281,12 @@ class CarStreamViewModel(
 
     fun applyAspectRatioCssToWeb(mode: String, customZoom: Int) {
         val objectFitAndTransform = when (mode) {
-            "ULTRAWIDE_21_9" -> "v.style.objectFit='cover';v.style.transform='scale(1.18, 1.05)';"
+            "ULTRAWIDE_21_9" -> "v.style.objectFit='cover';v.style.transform='scale(1.14, 1.02)';"
             "STRETCH_FULL" -> "v.style.objectFit='fill';v.style.transform='scale(1.0)';"
             "ZOOM_115" -> "v.style.objectFit='cover';v.style.transform='scale(1.15)';"
             "ZOOM_130" -> "v.style.objectFit='cover';v.style.transform='scale(1.30)';"
             else -> {
-                val scale = (customZoom.coerceIn(80, 160)) / 100.0
+                val scale = (customZoom.coerceIn(85, 145)) / 100.0
                 "v.style.objectFit='contain';v.style.transform='scale($scale)';"
             }
         }
@@ -316,7 +343,7 @@ class CarStreamViewModel(
             _uiState.update {
                 it.copy(
                     showAddBookmarkDialog = false,
-                    statusBannerMessage = "บันทึกบุ๊กมาร์ก '$title' ลงหน้าจอรถแล้ว"
+                    statusBannerMessage = "บันทึกบุ๊กมาร์ก '$title' ลงคลังแล้ว"
                 )
             }
         }

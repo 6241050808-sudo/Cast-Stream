@@ -1,0 +1,6 @@
+{
+  "name": "CarStream Auto",
+  "description": "ระบบสตรีมวิดีโอ YouTube, เว็บ และไฟล์มีเดียสำหรับ Android Auto พร้อมโหมดแสดงผลหน้าจอรถยนต์ (Coolwalk HUD) และการปรับปรุงข้อจำกัดเดิมให้ลื่นไหลทันสมัย",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

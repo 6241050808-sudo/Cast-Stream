@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">CarStream Auto</string>
+    <string name="nav_player">เครื่องเล่น</string>
+    <string name="nav_bookmarks">บุ๊กมาร์ก</string>
+    <string name="nav_car_hud">หน้าจอในรถ (AA)</string>
+    <string name="nav_fixes">แก้ข้อจำกัด</string>
+    <string name="search_or_url_hint">ค้นหา YouTube หรือวาง URL สตรีม...</string>
+    <string name="aspect_ratio">สัดส่วนภาพ</string>
+    <string name="audio_sync">ซิงค์เสียง (ms)</string>
+    <string name="rotary_keyboard">แป้นพิมพ์ในรถ</string>
+    <string name="local_video_picker">เปิดไฟล์วิดีโอในเครื่อง</string>
+</resources>
